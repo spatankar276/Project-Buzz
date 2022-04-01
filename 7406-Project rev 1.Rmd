@@ -1,0 +1,1190 @@
+---
+title: "7406-Project"
+output: html_notebook
+---
+
+Datasets review
+
+```{r}
+rm(list = ls()) # Clear the environment
+
+if (!require(dplyr)) install.packages("dplyr",dependencies = TRUE)
+if (!require(magrittr)) install.packages("magritter",dependencies = TRUE)
+if (!require(kernlab)) install.packages("kernlab",dependencies = TRUE)
+if (!require(kknn)) install.packages("kknn",dependencies = TRUE)
+if (!require(ggplot2)) install.packages("ggplot2", dependencies = TRUE)
+if (!require(lattice)) install.packages("lattice", dependencies = TRUE)
+if (!require(caret)) install.packages("caret", dependencies = TRUE)
+if (!require(qcc)) install.packages("qcc", dependencies = TRUE)
+if (!require(stats)) install.packages("stats", dependencies = TRUE)
+if (!require(outliers)) install.packages("outliers", dependencies = TRUE)
+if (!require(knitr)) install.packages("knitr", dependencies = TRUE)
+if (!require(kableExtra)) install.packages("kableExtra", dependencies = TRUE)
+if (!require(comprehenr)) install.packages("comprehenr", dependencies = TRUE)
+if (!require(gridExtra)) install.packages("gridExtra", dependencies = TRUE)
+if (!require(cli)) install.packages("cli", dependencies = TRUE)
+if (!require(devtools)) install.packages("devtools", dependencies = TRUE)
+
+if (!require(psych)) install.packages("psych", dependencies = TRUE)
+if (!require(corrplot)) install.packages("corrplot", dependencies = TRUE)
+if (!require(car)) install.packages("car", dependencies = TRUE)
+if (!require(rpart)) install.packages("rpart",dependencies = TRUE)
+if (!require(randomForest)) install.packages("randomForest",dependencies = TRUE)
+if (!require(rpart.plot)) install.packages("rpart.plot",dependencies = TRUE)
+if (!require(rattle)) install.packages("rattle",dependencies = TRUE)
+if (!require(RColorBrewer)) install.packages("RColorBrewer",dependencies = TRUE)
+if (!require(tree)) install.packages("tree",dependencies = TRUE)
+if (!require(pROC)) install.packages("pROC",dependencies = TRUE)
+if (!require(gbm)) install.packages("gbm",dependencies = TRUE)
+if (!require(aod)) install.packages("aod",dependencies = TRUE)
+if (!require(class)) install.packages("class",dependencies = TRUE)
+if (!require(e1071)) install.packages("e1071",dependencies = TRUE)
+if (!require(NbClust)) install.packages("NbClust",dependencies = TRUE)
+if (!require(parameters)) install.packages("parameters",dependencies = TRUE)
+if (!require(effects)) install.packages("effects",dependencies = TRUE)
+
+
+library(parameters)
+library(e1071)
+library(class)
+library(tree) 
+library(aod)
+library(pROC)
+library(factoextra)
+library(RColorBrewer)
+library(rattle)
+library(rpart.plot)
+library(rpart)
+library(randomForest)
+library(psych)
+library(cli)
+library(devtools)
+library(car)
+library(NbClust)
+library(effects)
+
+library(dplyr)
+library(kernlab)
+library(kknn)
+library(caret)
+library(lattice)
+library(ggplot2)
+library(outliers)
+library(qcc)
+library(stats)
+library(knitr)
+library(kableExtra)
+library(comprehenr)
+library(gridExtra)
+library(MASS)
+library(GGally)
+library(corrplot)
+
+library(gbm)
+library(ISLR)
+library(tidyverse)
+
+setwd("~/Downloads/Datasets/7406/Project")
+
+white <- read.csv(file = "winequality_white.csv", head = TRUE, sep=";")
+red <- read.csv(file = "winequality_red.csv", head = TRUE, sep=";")
+
+#wine <- rbind(white, red)
+wine <- red
+wine.pr <- wine[1:11] #predictors only
+
+head(wine)
+str(wine)
+summary(wine)
+
+nobs <- nrow(wine)
+print(paste('Number of Observations = ', nobs))
+
+
+```
+
+Missing Values
+
+Our response variable is'quality'. It will be converted to a binary 
+categorical variable
+
+Our dataset does not have any missing values.
+
+Our response variable "Quality" is a categorical one with the ranks from 1 to 10. 
+The range of values (min/max) across the variables does not require scaling or 
+normalization. All predictors are numerical.
+
+```{r}
+na_count <- sapply(wine, function(y) sum(length(which(is.na(y)))))
+na_count
+
+```
+
+
+OUTLIERS
+
+There are few outliers for the lowest and highest ranking. We decided not to 
+remove them because it may reflect individual preferences.
+
+```{r}
+par(mfrow = c(2,2))
+qqnorm(wine$quality, pch = 1, frame = FALSE, main = 'QQ-plot - QUALITY')
+qqline(wine$quality, col = "blue", lwd = 2)
+boxplot(wine$quality, main = 'Original data - Outliers')
+
+grubbs.test(wine$quality, type =10)
+
+
+```
+
+Covariance Matrix
+
+There is some significant multicollineraity between several variables:
+
+density - alcohol total.sulfur.dioxide - free.sulfur.dioxide density - residual.sugar residual.sugar - total.sulfur.dioxide density - fixed.acidity
+
+Certain predictors will have to be removed. Most likely candidates are:
+
+free.sulfur.dioxide residual.sugar fixed.acidity alcohol
+
+```{r}
+
+corrplot(cor(wine[1:(length(wine))]), method="number", main = "Red Wine")
+```
+
+Additional data Exploration
+
+```{r}
+
+par(mfrow = c(2,2))
+
+hist(wine$quality,xlab = 'Quality', main = "Distribution of Red Wine Quality")
+#hist(wine[wine$type == "white",]$quality,xlab = 'Quality', main = "Distribution of White Wine Quality")
+#hist(wine[wine$type == "red",]$quality,xlab = 'Quality', main = "Distribution of Red Wine Quality")
+
+
+attach(wine)
+par(mfrow = c(3,2))
+
+plot(density, fixed.acidity)
+plot(volatile.acidity, total.sulfur.dioxide)
+plot(residual.sugar, density)
+plot(residual.sugar, total.sulfur.dioxide)
+plot(free.sulfur.dioxide, total.sulfur.dioxide)
+plot(density, alcohol)
+
+par(mfrow = c(3,3))
+boxplot(fixed.acidity ~ quality)
+boxplot(volatile.acidity ~ quality)
+boxplot(citric.acid ~ quality)
+boxplot(residual.sugar ~ quality)
+boxplot(chlorides ~ quality)
+boxplot(free.sulfur.dioxide ~ quality)
+boxplot(total.sulfur.dioxide ~ quality)
+boxplot(density ~ quality)
+boxplot(pH ~ quality)
+boxplot(sulphates ~ quality)
+boxplot(alcohol ~ quality)
+```
+
+Clustering - ORIGINAL DATA
+
+```{r}
+# Set column names
+
+cnames <- c("fixed.acidity", "volatile.acidity", "citric.acid",
+          "residual.sugar", "chlorides", "free.sulfur.dioxide",
+          "total.sulfur.dioxide", "density", "pH",
+          "sulphates", "alcohol", "quality")
+
+# Columns used for prediction are all columns except 'quality'.
+
+xcol <- c("fixed.acidity", "volatile.acidity", "citric.acid",
+          "residual.sugar", "chlorides", "free.sulfur.dioxide",
+          "total.sulfur.dioxide", "density", "pH",
+          "sulphates", "alcohol")
+
+colnames(red)   <- cnames
+colnames(white) <- cnames
+```
+
+
+KMEANS optimization - FULL dataset
+
+```{r}
+
+
+num <- 20
+nst <- 10 #Initial number of centroids
+
+res_fin <- matrix(0, num, 1) 
+
+for (k in 1:num) {
+  
+    kmd <- kmeans(wine, k, nstart = nst)
+    kvl <- kmd$tot.withinss
+    res_fin[k] <- kvl
+}
+
+plot(res_fin, type = 'l', ylab = 'WSS', xlab = 'K',
+     main = 'Optimal K value for KMEANS')
+
+k_best <- which.max(res_fin)
+print(paste(' Best K = ', k_best))
+
+# WSS Method
+
+kbest <- 3 # The best K Value
+fitK = kmeans(wine, kbest, nstart = 5)
+plot(wine,col = fitK$cluster)
+
+```
+Optimum Number of Clusters
+
+```{r}
+
+ # Elbow method
+ fviz_nbclust(wine, kmeans, method = "wss") +
+   geom_vline(xintercept = 4, linetype = 2) +
+   labs(subtitle = "Elbow Method")
+ 
+ # Silhouette method
+fviz_nbclust(wine, kmeans, method = "silhouette") +
+  labs(subtitle = "Silhouette method")
+
+
+```
+
+
+
+```{r}
+kbest <- 4
+kmod <- wine %>% .[,xcol] %>%
+  kmeans(x = ., centers = kbest, nstart = 25)
+
+print(paste('K-best = ', kbest))
+
+wine %>% .[,xcol] %>%
+  fviz_cluster(object = kmod, 
+               choose.vars = c("chlorides", "total.sulfur.dioxide"),
+               geom   = "point", 
+               repel  = TRUE, 
+               main   = "Cluster plot with selected features",
+               xlab   = "Chlorides",
+               ylab   = "Total Sulfur Dioxide",
+               alpha=0.2,shape=19)
+
+wine %>% .[,xcol] %>%
+  fviz_cluster(object = kmod, 
+               choose.vars = c("alcohol", "total.sulfur.dioxide"),
+               geom   = "point", 
+               repel  = TRUE, 
+               main   = "Cluster plot with selected features",
+               xlab   = "Alcohol",
+               ylab   = "Total Sulfur Dioxide",
+               alpha=0.2,shape=19)
+
+wine %>% .[,xcol] %>%
+  fviz_cluster(object = kmod, 
+               choose.vars = c("alcohol", "sulphates"),
+               geom   = "point", 
+               repel  = TRUE, 
+               main   = "Cluster plot with selected features",
+               xlab   = "Alcohol",
+               ylab   = "Sulphates",
+               alpha=0.2,shape=19)
+
+wine %>% .[,xcol] %>%
+  fviz_cluster(object = kmod, 
+               choose.vars = c("alcohol", "chlorides"),
+               geom   = "point", 
+               repel  = TRUE, 
+               main   = "Cluster plot with selected features",
+               xlab   = "Alcohol",
+               ylab   = "Sulphates",
+               alpha=0.2,shape=19)
+
+ggplot(wine, aes(x = alcohol, y = chlorides, shape = quality, 
+                 col = quality))+geom_point()
+```
+
+
+
+MODELING
+
+We will start with converting scale values for "quality" from 1-10 to a binary system (0,1). A 1 will represent good wine and a 0 will represent "bad" wine. We will analyze initial dataset using ordinal logistic regression at the end of this research.
+
+At first, we will use logistic regression, KNN, SVM, Trees etc..
+
+For Logistic regression, we romoved the following non-significant predictors:
+
+density fixed.acidity residual.sugar
+
+This is well-aligned with the conclusions from the covariance matrix.
+
+
+Logistic Regression
+
+Conversion 'quality' into a binary categorical variable.
+
+
+```{r}
+
+#wine <- rbind(white, red)
+wine.pr <- wine[1:11] # predictors only
+wine.or <- wine #total dataset
+
+# Response variable as a binary
+wine$quality <- ifelse(wine$quality >= 6, 1,0)
+wine$quality <- as.factor(wine$quality)
+
+ggplot(wine, aes(x = total.sulfur.dioxide, y = chlorides, shape = quality, 
+                 col = quality))+geom_point()
+```
+
+
+Regression with ALL predictors - FULL dataset
+
+```{r}
+
+lgall <- glm(quality ~ ., data = wine, family = binomial(link="logit"))
+summary(lgall)
+
+wald.test(Sigma = vcov(lgall), b = coef(lgall), Terms = 1:length(lgall$coef))
+
+predal <- predict(lgall,wine[,1:11], type = "response")
+predal <- ifelse(predal >= .5, 1,0)
+
+# Confusion Matrix
+cmal <- confusionMatrix(wine$quality, as.factor(predal))
+print(cmal)
+
+aiclgall <- round(AIC(lgall),1)
+biclgall <- round(BIC(lgall),1)
+
+print(paste('AIC = ', aiclgall, '     BIC = ', biclgall, 
+            '     Accuracy = ', round(cmal$overall['Accuracy'],3)))
+
+print('Significance Ranking')
+round(vif(lgall),3)
+
+print(paste('Confidence Intervals'))
+exp(cbind(OR = coef(lgall), confint(lgall)))
+
+```
+
+Regression with SIGNIFICANT predictors - FULL dataset
+
+Based on BIC, optimized regression is substantially better than the regression
+with all predictors. Accuracy values are identical - 0.744
+
+```{r}
+
+
+lgsig <- glm(quality ~ .- residual.sugar - fixed.acidity - density - citric.acid - pH, 
+             data = wine, family = binomial(link="logit"))
+summary(lgsig)
+
+wald.test(Sigma = vcov(lgsig), b = coef(lgsig), Terms = 1:length(lgsig$coef))
+
+predsig <- predict(lgsig,wine[,1:11], type = "response")
+predsig <- ifelse(predsig >= .5, 1,0)
+
+# Confusion Matrix
+cmsig <- confusionMatrix(wine$quality, as.factor(predsig))
+print(cmal)
+
+aiclgsig <- round(AIC(lgsig),1)
+biclgsig <- round(BIC(lgsig),1)
+
+print(paste('AIC = ', aiclgsig, '     BIC = ', biclgsig, 
+            '     Accuracy = ', round(cmsig$overall['Accuracy'],3)))
+
+print('Significance Ranking')
+round(vif(lgsig),3)
+
+print(paste('Confidence Intervals'))
+exp(cbind(OR = coef(lgsig), confint(lgsig)))
+
+
+```
+
+Data Separation Exercisie including KMEANS
+
+The data is not separable. Thus, KNN is preferred choice over SVM
+
+
+```{r}
+ggplot(wine, aes(x = free.sulfur.dioxide, y = volatile.acidity, shape = quality, col = quality))+geom_point()
+ggplot(wine, aes(x = free.sulfur.dioxide, y = alcohol, shape = quality, col = quality))+geom_point()
+ggplot(wine, aes(x = free.sulfur.dioxide, y = sulphates, shape = quality, col = quality))+geom_point()
+ggplot(wine, aes(x = chlorides, y = sulphates, shape = quality, col = quality))+geom_point()
+ggplot(wine, aes(x = chlorides, y = alcohol, shape = quality, col = quality))+geom_point()
+ggplot(wine, aes(x = sulphates, y = alcohol, shape = quality, col = quality)) + geom_point()
+
+ggplot(wine, aes(x = free.sulfur.dioxide, y = chlorides, shape = quality, 
+                 col = quality))+geom_point()
+ggplot(wine, aes(x = total.sulfur.dioxide, y = chlorides, shape = quality, 
+                 col = quality))+geom_point()
+
+ggplot(wine, aes(x = volatile.acidity, y = chlorides, shape = quality, col = quality))+geom_point()
+
+ggplot(wine, aes(x = volatile.acidity, y = sulphates, shape = quality, col = quality))+geom_point()
+ggplot(wine, aes(x = volatile.acidity, y = alcohol, shape = quality, col = quality))+geom_point()
+
+```
+
+
+Split Data int Training and Test datasets: 80/20
+
+```{r}
+
+#Random sampling
+set.seed(7406)
+
+test <- 0.2
+ntr <- floor((1 - test)*nobs)
+ind <- sample(nobs, ntr, replace = FALSE)
+
+# Training and Test datasets
+wine_train <- wine[ind,]
+wine_test <- wine[-ind,]
+
+# #wine <- rbind(white, red)
+# wine.pr <- wine[1:11] # predictors only
+# wine.or <- wine #total dataset
+
+wine_train_or <- wine.or[ind,]
+wine_test_or <- wine.or[-ind,]
+
+wine_train_pr <- wine.pr[ind,]
+wine_test_pr <- wine.pr[-ind,]
+
+print(nobs)
+```
+
+
+
+KNN
+
+We choose K = 3 as the best
+
+```{r}
+
+k.optm=1 # We want the next best - Do not want to use K = 1
+
+for (i in 1:28){
+    knn.mod <- knn(train=wine_train, test=wine_test, cl=wine_train$quality, k=i)
+    
+    k.optm[i] <- 100 * sum(wine_test$quality == knn.mod)/nrow(wine_test)
+    
+    k=i
+    cat(k,'=',k.optm[i],'
+    
+')}
+
+plot(k.optm, type="b", xlab="K- Value",ylab="Accuracy level")
+```
+
+```{r}
+
+knnb = 3
+
+knn <- knn(train=wine_train, test=wine_test, cl=wine_train$quality, k= knnb)
+
+cmknn <- confusionMatrix(wine_test$quality, as.factor(knn))
+print(cmknn)
+
+print(paste('Accuracy = ', round(cmknn$overall['Accuracy'],3) ))
+
+```
+
+
+SVM
+It is not the best choice due to the nature of the data but we try it anayway
+
+Linear Classifier
+
+```{r}
+# To get graphical outputs
+results_c <- matrix(rep(0, len=20), nrow = 2)
+
+c_value = c(1, 2, 3, 5, 10, 20, 50, 100, 500, 1000) # chosen C values to select from
+cl = length(c_value) 
+
+for (j in 1:cl) {
+  
+  cj <- c_value[j]
+  results_c[1,j] <- cj
+    
+  msvm <- svm(formula = quality ~ .,
+                data = wine_train,
+                type = 'C-classification',
+                kernel = 'linear',
+                cost = cj,
+                scaled = TRUE)
+    
+  print(msvm) # display the model
+
+  # Model Prediction and Accuracy
+  pred <- predict(msvm,wine_test[,1:11])
+  acc = sum(pred == wine_test$quality) / (nobs-ntr)
+  results_c[2,j] <- acc
+    
+}
+
+svmo <- svm(formula = quality ~., data=wine_train,
+            type = 'C-classification',
+            kernel = 'linear',
+            cost = cj,
+            scaled = TRUE)
+
+plot(results_c[1,], results_c[2,],main="Accuracy for C Values, Linear",
+     ylab = "Accuracy, %", xlab = "C", type = "l", col = "red")
+
+cl_best <- which.max(results_c[2,])
+print(paste(' Best C = ', c_value[cl_best], '   Accuracy = ', round(results_c[2,cl_best],3)))
+
+svmo <- svm(formula = quality ~., data=wine_train,
+            type = 'C-classification',
+            kernel = 'linear',
+            cost = c_value[cl_best],
+            scaled = TRUE)
+
+```
+
+
+
+Non-linear classifier
+
+```{r}
+# To get graphical outputs
+results_c <- matrix(rep(0, len=20), nrow = 2)
+
+c_value = c(1, 2, 3, 5, 10, 20, 50, 100, 500, 1000) 
+cl = length(c_value) 
+
+for (j in 1:cl) {
+  
+  cj <- c_value[j]
+  results_c[1,j] <- cj
+    
+  msvm <- svm(formula = quality ~ .,
+                data = wine_train,
+                type = 'C-classification',
+                kernel = 'radial',
+                cost = cj,
+                scaled = TRUE)
+    
+  print(msvm) # display the model
+
+  # Model Prediction and Accuracy
+  pred <- predict(msvm,wine_test[,1:11])
+  prediction = sum(pred == wine_test$quality) / (nobs-ntr)
+  results_c[2,j] <- prediction
+    
+}
+
+plot(results_c[1,], results_c[2,],main="Accuracy for C Values, Radial",
+     ylab = "Accuracy, %", xlab = "C", type = "l", col = "red")
+
+cr_best <- which.max(results_c[2,])
+print(paste(' Best C = ', c_value[cr_best], '   Accuracy = ', round(results_c[2,cr_best],3)))
+
+```
+
+
+Random Forest
+
+```{r}
+
+rf = randomForest(quality ~ ., 
+                  data=wine_train, 
+                  importance=TRUE, ntree=501, confusion=TRUE, err.rate=TRUE,
+                  parms=list(split="gini"), proximity = TRUE) 
+print(rf)
+varImpPlot(rf, main = "Original Random Forest")
+plot(rf, main = 'Original Random Forest')
+
+rfortr <- predict(rf, newdata = wine_train, type = "class")
+rforts <- predict(rf, newdata = wine_test, type = "class")
+
+#Confusion Matrix
+# Train
+cmrftr <- confusionMatrix(as.factor(rfortr), wine_train$quality)
+print(cmrftr)
+accrftr <- cmrftr$overall["Accuracy"]
+print(paste('RF Original Train Error = ', round(1 - accrftr['Accuracy'],4)))
+
+# Test
+cmrfts <- confusionMatrix(as.factor(rforts), wine_test$quality)
+print(cmrfts)
+accrfts <- cmrfts$overall["Accuracy"]
+print(paste('RF Original Test Error = ', round(1 - accrfts['Accuracy'],4)))
+
+#Optimization mtry
+mtry <- tuneRF(wine_train[,1:11],wine_train$quality, ntreeTry=1000,
+               stepFactor=1.5,improve=0.01, trace=TRUE, plot=TRUE)
+
+best.m <- mtry[mtry[, 2] == min(mtry[, 2]), 1]
+print(mtry)
+print(paste('Best mtry = ', best.m))
+
+rfb <-randomForest(quality ~ .,
+                   data=wine_train, 
+                   importance=TRUE, ntree=1000, mtry= best.m,
+                   confusion=TRUE, err.rate=TRUE, parms=list(split="gini"), 
+                   proximity = TRUE)
+print(rfb)
+varImpPlot(rfb, main = "Optimized Random Forest", sort = TRUE)
+
+plot(rfb, main = 'Optimized Random Forest')
+
+hist(treesize(rfb),
+     main = "No. of Nodes for the Trees - Optimized RandomForest",
+     col = "green")
+
+
+
+```
+Random Forest Confusion Matrix
+
+```{r}
+
+#Optimized RF
+rforoptr <- predict(rfb, newdata = wine_train, type = "class")
+rforopts <- predict(rfb, newdata = wine_test, type = "class")
+
+# Train
+cmrfbtr <- confusionMatrix(as.factor(rforoptr), wine_train$quality)
+print(cmrfbtr)
+accrfbtr <- cmrfbtr$overall["Accuracy"]
+print(paste('RF Optimized Train Error = ', round(1 - accrfbtr['Accuracy'],4)))
+
+
+# Test
+cmrfbts <- confusionMatrix(as.factor(rforopts), wine_test$quality)
+print(cmrfbts)
+accrfbts <- cmrfbts$overall["Accuracy"]
+print(paste('RF Optimized Test Error = ', round(1 - accrfbts['Accuracy'],4)))
+```
+
+Random Forrest cross Validation
+
+
+```{r}
+control <- trainControl(method='repeatedcv', 
+                        number=10, 
+                        repeats=3,
+                        search = 'random')
+
+rf_random <- train(quality ~ .,
+                   data = wine_train,
+                   method = 'rf',
+                   metric = 'Accuracy',
+                   tuneLength  = 15, 
+                 
+                   trControl = control)
+print(rf_random)
+```
+Random Forrest Significant variables only
+
+```{r}
+
+
+rf = randomForest(quality ~ . - residual.sugar - fixed.acidity - 
+    density - citric.acid - pH, 
+                  data=wine_train, 
+                  importance=TRUE, ntree=501, confusion=TRUE, err.rate=TRUE,
+                  parms=list(split="gini"), proximity = TRUE) 
+print(rf)
+varImpPlot(rf, main = "Original Random Forest")
+plot(rf, main = 'Original Random Forest')
+
+rfortr <- predict(rf, newdata = wine_train, type = "class")
+rforts <- predict(rf, newdata = wine_test, type = "class")
+
+#Confusion Matrix
+# Train
+cmrftr <- confusionMatrix(as.factor(rfortr), wine_train$quality)
+print(cmrftr)
+accrftr <- cmrftr$overall["Accuracy"]
+print(paste('RF Original Train Error = ', round(1 - accrftr['Accuracy'],4)))
+
+# Test
+cmrfts <- confusionMatrix(as.factor(rforts), wine_test$quality)
+print(cmrfts)
+accrfts <- cmrfts$overall["Accuracy"]
+print(paste('RF Original Test Error = ', round(1 - accrfts['Accuracy'],4)))
+
+#Optimization mtry
+mtry <- tuneRF(wine_train[,1:11],wine_train$quality, ntreeTry=1000,
+               stepFactor=1.5,improve=0.01, trace=TRUE, plot=TRUE)
+
+best.m <- mtry[mtry[, 2] == min(mtry[, 2]), 1]
+print(mtry)
+print(paste('Best mtry = ', best.m))
+
+rfb <-randomForest(quality ~ .,
+                   data=wine_train, 
+                   importance=TRUE, ntree=1000, mtry= best.m,
+                   confusion=TRUE, err.rate=TRUE, parms=list(split="gini"), 
+                   proximity = TRUE)
+print(rfb)
+varImpPlot(rfb, main = "Optimized Random Forest", sort = TRUE)
+
+plot(rfb, main = 'Optimized Random Forest')
+
+hist(treesize(rfb),
+     main = "No. of Nodes for the Trees - Optimized RandomForest",
+     col = "green")
+
+
+
+
+```
+```{r}
+#Optimized RF
+rforoptr <- predict(rfb, newdata = wine_train, type = "class")
+rforopts <- predict(rfb, newdata = wine_test, type = "class")
+
+# Train
+cmrfbtr <- confusionMatrix(as.factor(rforoptr), wine_train$quality)
+print(cmrfbtr)
+accrfbtr <- cmrfbtr$overall["Accuracy"]
+print(paste('RF Optimized Train Error = ', round(1 - accrfbtr['Accuracy'],4)))
+
+
+# Test
+cmrfbts <- confusionMatrix(as.factor(rforopts), wine_test$quality)
+print(cmrfbts)
+accrfbts <- cmrfbts$overall["Accuracy"]
+print(paste('RF Optimized Test Error = ', round(1 - accrfbts['Accuracy'],4)))
+
+
+```
+
+
+Decision Tree
+
+```{r}
+
+dtnp = rpart(quality ~ ., data=wine_train, 
+             method = "class",
+             model = TRUE, xval = 10, parms=list(split="gini")) 
+print(summary(dtnp))
+
+#Redistribution Error and R-squared
+#Training
+prednp <- predict(dtnp, newdata = wine_train, type = "class")
+mcnp <- table(wine_train$quality, prednp)
+err.resub <- round(1.0 - (mcnp[1,1] + mcnp[2,2])/sum(mcnp),3)
+
+print("Non-pruned Tree without CV")
+print(paste('Training Redistribution Error = ', err.resub))
+printcp(dtnp)
+plotcp(dtnp)
+
+rpart.plot(dtnp, yesno = TRUE, extra = 106)
+fancyRpartPlot(dtnp, uniform=TRUE, main="Non-Pruned Classification Tree")
+
+#Confusion Matrix
+cmdt <- confusionMatrix(as.factor(prednp), wine_train$quality)
+accdt <- cmdt$overall["Accuracy"]
+print(paste('LG CV Train Error = ', round(1 - accdt['Accuracy'],4)))
+
+
+```
+
+Cross-validation BEFORE prunning
+
+```{r}
+
+# specify parameters for cross validation
+control <- trainControl(method = "repeatedcv", 
+                        number = 10, # number of folds
+                        repeats = 3, # repeat times
+                        search = "grid")
+dtcv <- train(quality ~ .,
+                       data = wine_train,
+                       method = "rpart",
+                       trControl = control)
+print.train(dtcv)
+
+rpart.plot(dtcv$finalModel, extra = 106)
+plot.train(dtcv)
+
+# Test
+pred_test <- predict(dtnp, newdata = wine_test, type = "class")
+
+#Confusion Matrix
+cmdt_test <- confusionMatrix(as.factor(pred_test), wine_test$quality)
+accdtst <- cmdt_test$overall["Accuracy"]
+print(paste('LG CV Test Error = ', round(1 - accdtst['Accuracy'],4)))
+
+
+```
+
+Pruning Tree
+
+```{r}
+
+opt <- which.min(dtnp$cptable[, "xerror"]); 
+cp1 <- dtnp$cptable[opt, "CP"];
+print(paste('Optimal cp = ', cp1))
+dtpr <- prune(dtnp,cp=cp1);
+
+fancyRpartPlot(dtpr, uniform=TRUE, main="Pruned Tree")
+dtPrednp <- predict(dtpr, newdata = wine_train, type = "class") 
+
+#Testing
+predpr_test <- predict(dtpr, newdata = wine_test, type = "class")
+
+#Confusion Matrix
+#Testing
+cmdtpr_test <- confusionMatrix(as.factor(predpr_test), wine_test$quality)
+accdtstpr <- cmdtpr_test$overall["Accuracy"]
+print(paste('DT CV Test Error = ', round(1 - accdtstpr['Accuracy'],4)))
+
+#Confusion Matrix
+#Training
+cmdtpr <- confusionMatrix(as.factor(dtPrednp), wine_train$quality)
+accdtpr <- cmdtpr$overall["Accuracy"]
+print(paste('DT CV Train Error = ', round(1 - accdtpr['Accuracy'],4)))
+
+rpart.plot(dtpr, yesno = TRUE)
+fancyRpartPlot(dtpr, uniform=TRUE, main="Pruned Classification Tree")
+
+
+```
+
+Implementation of Monte Carlos CV for: Logistic Regression, KNN, SVM, 
+Ordinal Regression, Random Forest, Decision Tree
+
+```{r}
+
+set.seed(7406)
+
+n = dim(wine)[1]
+n1 = round(n * test)
+B= 100
+
+b_index <- list()
+te1 <- list()
+te2 <- list()
+te3 <- list()
+te4 <- list()
+te5 <- list()
+te6 <- list()
+te7 <- list()
+
+
+for (b in 1:B) {
+### randomly select n1 observations as a new training  subset in each loop
+  flag <- sort(sample(1:n, n1));
+  wine_train_temp <- wine[-flag,];  ## temp training set for CV
+  wine_test_temp  <- wine[flag,]; ## temp testing set for CV
+    
+  b_index <- c(b_index, b)
+     
+    # Model 1: Logistic Regression with All Predictors
+  lgall <- glm(quality ~ ., data = wine_train_temp, family = binomial(link="logit"))
+  prediction <- predict(lgall,wine_test_temp[,1:11], type = "response")
+  prediction <- ifelse(prediction>= .5, 1,0)
+  cm <- confusionMatrix(wine_test_temp$quality, as.factor(prediction))
+  te1 <- c(te1,round(cm$overall[['Accuracy']],3))
+    
+    # Model 2: Logistic Regression with Significant Predictors
+  lgselect <- glm(quality ~ .- residual.sugar - fixed.acidity - density - 
+                  citric.acid - pH, 
+                  data = wine, 
+                  family = binomial(link="logit"))
+  prediction <- predict(lgselect,wine_test_temp[,1:11], type = "response")
+  prediction <- ifelse(prediction>= .5, 1,0)
+  cm <- confusionMatrix(wine_test_temp$quality, as.factor(prediction))
+  te2 <- c(te2,round(cm$overall[['Accuracy']],3))
+    
+    # Model 3: Knn at k = 3
+  knn <- knn(train=wine_train_temp, test=wine_test_temp, 
+             cl=wine_train_temp$quality, k=3)
+  cm <- confusionMatrix(wine_test_temp$quality, as.factor(knn))
+  te3 <- c(te3,round(cm$overall[['Accuracy']],3))
+    
+    # Model 4: SVM C = 3
+  classifier = svm(formula = quality ~ .,data = wine_train_temp,type = 
+                     'C-classification', cost = cr_best, kernel = 'radial')
+  predictions <- predict(classifier, newdata = wine_test_temp[,1:11])
+  cm <- confusionMatrix(wine_test_temp$quality, as.factor(predictions))
+  te4 <- c(te4,round(cm$overall[['Accuracy']],3))
+
+    # Model 5: Random Forest - mtry
+  rf <- randomForest(quality~., data=wine_train_temp, proximity=TRUE, mtry = best.m) 
+  predictions <- predict(rf, wine_test_temp)
+  cm <- confusionMatrix(predictions, wine_test_temp$quality)
+  te5 <- c(te5,round(cm$overall[['Accuracy']],3))
+    
+    # Model 6: Decision Tree - cp
+  fit <- rpart(quality~., data = wine_train_temp, method = 'class')
+  dtpr <- prune(fit,cp=cp1)
+  
+  predictions <- predict(dtpr, wine_test_temp, type = 'class')
+  cm <- confusionMatrix(wine_test_temp$quality, as.factor(predictions))
+  te6 <- c(te6,round(cm$overall[['Accuracy']],3))
+
+  
+}
+
+TEALL <- data.frame(unlist(te1), unlist(te2), unlist(te3), unlist(te4), 
+                    unlist(te5), unlist(te6))
+
+colnames(TEALL) <- c("LogReg", "LogRegSelect", "Knn", "Svm", "RF", "DTree")
+
+results_viz = data.frame(unlist(apply(TEALL, 2, mean)))
+results_viz
+
+```
+
+BOOSTING
+
+```{r}
+#wine <- rbind(white, red)
+wine <- red
+wine.pr <- wine[1:11]
+
+#wine <- read.csv(file = "winequality_red.csv", head = TRUE, sep=";")
+wine$quality <- ifelse(wine$quality>= 6, 1,0)
+
+#Random sampling
+#set.seed(7406)
+
+#ff <- floor((1 - test)*nobs)
+
+#ind <- sample(nrow(wine), ff, replace = FALSE)
+
+# Training and Test datasets
+wine_train <- wine[ind,]
+wine_test <- wine[-ind,]
+
+gbm.train <- gbm(quality ~ .,
+                 data=wine_train,
+                 distribution = 'bernoulli',
+                 n.trees = 5000, 
+                 shrinkage = 0.01, 
+                 interaction.depth = 3,
+                 cv.folds = 10,
+                 n.cores = NULL,verbose = FALSE)
+                  
+## Model Inspection 
+## Find the estimated optimal number of iterations
+perf_gbm1 = gbm.perf(gbm.train, method="cv") 
+print(perf_gbm1)
+      
+summary(gbm.train)
+```
+
+```{r}
+## Training error
+pred1gbm <- predict(gbm.train,newdata = wine_train, n.trees=perf_gbm1, 
+                    type="response")
+
+y1hat <- ifelse(pred1gbm < 0.5, 0, 1)
+
+bst_train_err <- round(mean(y1hat != wine_train$quality),4)
+print(paste('Boost Training Error = ', bst_train_err))
+
+## Testing Error
+y2hat <- ifelse(predict(gbm.train,newdata = wine_test, n.trees=perf_gbm1, 
+                        type="response") < 0.5, 0, 1)
+bst_test_err <- round(mean(y2hat != wine_test$quality),4)
+print(paste('Boost Testing Error = ', bst_test_err))
+
+
+```
+
+Only SIGNIFICANT Variables
+
+```{r}
+
+gbm.sig <- gbm(quality ~ . - residual.sugar - fixed.acidity - density - citric.acid - pH,
+                 data=wine_train,
+                 distribution = 'bernoulli',
+                 n.trees = 5000, 
+                 shrinkage = 0.01, 
+                 interaction.depth = 3,
+                 cv.folds = 10,
+                 n.cores = NULL,verbose = FALSE)
+                  
+## Model Inspection 
+## Find the estimated optimal number of iterations
+perf_gbm2 = gbm.perf(gbm.sig, method="cv") 
+print(perf_gbm2)
+      
+summary(gbm.sig)
+```
+```{r}
+## Training error
+pred11gbm <- predict(gbm.sig,newdata = wine_train, n.trees=perf_gbm2, 
+                     type="response")
+
+y11hat <- ifelse(pred11gbm < 0.5, 0, 1)
+
+bst1_train_err <- round(mean(y11hat != wine_train$quality),4)
+print(paste('Boost Training Error = ', bst1_train_err))
+
+## Testing Error
+y22hat <- ifelse(predict(gbm.sig,newdata = wine_test, n.trees=perf_gbm2, 
+                         type="response") < 0.5, 0, 1)
+bst2_test_err <- round(mean(y22hat != wine_test$quality),4)
+print(paste('Boost Testing Error = ', bst2_test_err))
+
+
+```
+
+Ordinal Regression
+
+Data Preparation
+```{r}
+
+# wine.or <- read.csv(file = "winequality_red.csv", head = TRUE, sep=";")
+# 
+# #Random sampling
+# set.seed(7406)
+# 
+# test <- 0.2
+# ntr <- floor((1 - test)*nobs)
+# ind <- sample(nobs, ntr, replace = FALSE)
+# 
+# wine_train_or <- wine.or[ind,] # original data
+# wine_test_or <- wine.or[-ind,]
+
+
+```
+
+
+```{r}
+
+# All predictors - Train / Test
+ord_mod <- polr(formula = as.factor(quality) ~., 
+                data = wine_train_or, Hess = TRUE)
+summary(ord_mod)
+```
+
+```{r}
+(ctable <- coef(summary(ord_mod)))
+```
+
+
+```{r}
+
+## calculate and store p values
+p <- pnorm(abs(ctable[, "t value"]), lower.tail = FALSE) * 2
+
+## combined table
+(ctable <- cbind(ctable, "p value" = p))
+```
+
+
+```{r}
+
+#(ci <- confint(ord_mod)) # default method gives profiled CIs
+
+confint.default(ord_mod) # CIs assuming normality
+```
+
+
+```{r}
+
+#Compute confusion table and misclassification error - TRAIN
+
+predqualtr = predict(ord_mod,wine_train_or)
+table(wine_train_or$quality, predqualtr)
+cmactr <- mean(as.character(wine_train_or$quality) != as.character(predqualtr))
+print(paste('All Predictors Training Accuracy = ', 1 - round(cmactr, 4)))
+```
+
+```{r}
+
+#Compute confusion table and misclassification error - TEST
+
+predqualts = predict(ord_mod,wine_test_or)
+table(wine_test_or$quality, predqualts)
+cmacts <- mean(as.character(wine_test_or$quality) != as.character(predqualts))
+print(paste('All Predictors Test Accuracy = ', 1 - round(cmacts, 4)))
+```
+
+
+Significant Predictors
+
+```{r}
+
+ord_mods <- polr(formula = as.factor(quality) ~. - citric.acid - fixed.acidity - residual.sugar, 
+                 data = wine_train_or, Hess = TRUE)
+summary(ord_mods)
+```
+
+```{r}
+(ctable1 <- coef(summary(ord_mods)))
+```
+
+
+```{r}
+confint.default(ord_mods) # CIs assuming normality
+```
+
+
+```{r}
+
+#Compute confusion table and misclassification error - TRAIN
+
+predqualtrs = predict(ord_mods,wine_train_or)
+table(wine_train_or$quality, predqualtrs)
+cmactrs <- mean(as.character(wine_train_or$quality) != as.character(predqualtrs))
+print(paste('Significant Predictors Training Accuracy = ', 1 - round(cmactrs, 4)))
+
+```
+
+
+```{r}
+
+#Compute confusion table and misclassification error - TEST
+
+predqualtss = predict(ord_mods,wine_test_or)
+table(wine_test_or$quality, predqualtss)
+cmactss <- mean(as.character(wine_test_or$quality) != as.character(predqualtss))
+print(paste('Significant Predictors Testing Accuracy = ', 1 - round(cmactss, 4)))
+```
+
+```{r}
+## calculate and store p values
+p <- pnorm(abs(ctable1[, "t value"]), lower.tail = FALSE) * 2
+
+## combined table
+(ctable1 <- cbind(ctable1, "p value" = p))
+```
+
+
+```{r}
+ci1 <- confint.default(ord_mods) # CIs assuming normality
+ci1
+```
+
+```{r}
+## odds ratios - These coefficients are called proportional odds ratios
+exp(cbind(OR = coef(ord_mods), ci1))
+```
+
+
+
+Plotting
+```{r}
+
+par(cex.axis=0.25)
+Effect(focal.predictors = "chlorides",ord_mods)
+plot(Effect(focal.predictors = "sulphates",ord_mods))
+#plot(Effect(focal.predictors = c("chlorides", "sulphates"),ord_mods))
+
+par(cex.axis=1.0)
+
+
+```
+
